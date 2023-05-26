@@ -5,6 +5,7 @@ from blog.sitemaps import PostSitemap
 from django.contrib import admin
 from django.urls import path
 
+
 """
 URL configuration for mysite project.
 
