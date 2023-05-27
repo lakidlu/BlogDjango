@@ -1,12 +1,12 @@
 from django.shortcuts import render, get_object_or_404
 from .models import Post, Comment
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
-from django .views.generic import ListView
+from django.views.generic import ListView
 from .forms import EmailPostForm, CommentForm, SearchForm
 from django.core.mail import send_mail
 from taggit.models import Tag
 from django.db.models import Count
-from django.contrib.postgres.search import SearchVector
+from django.contrib.postgres.search import SearchVector, SearchQuery, SearchRank
 
 
 def post_search(request):
@@ -17,9 +17,13 @@ def post_search(request):
         form = SearchForm(request.GET)
         if form.is_valid():
             query = form.cleaned_data['query']
+            search_vector = SearchVector('title', weight='A') + \
+                            SearchVector('body', weight='B')
+            search_query = SearchQuery(query)
             results = Post.object.annotate(
-                search=SearchVector('title', 'body'),
-            ).filter(search=query)
+                search=search_vector,
+                rank=SearchRank(search_vector, search_query)
+            ).filter(rank__gte=0.2).order_by('-rank')
     return render(request,
                   'blog/post/search.html',
                   {'form': form,
@@ -39,7 +43,7 @@ def post_share(request, post_id):
             # Weryfikacja pól formularza zakończyła siępowodzeniem...
             cd = form.cleaned_data
             post_url = request.build_absolute_uri(
-                                                post.get_absolute_url())
+                post.get_absolute_url())
             subject = '{} ({}) zachęca do przeczytania "{}"', format(cd['name'],
                                                                      cd['email'], post.title)
             message = 'Przeczytaj post "{}" na stronie {}\n\n Komentarz dodany przez: {}: {}'.format(
@@ -64,7 +68,7 @@ def post_list(request, tag_slug=None):
     object_list = Post.published.all()
     tag = None
     if tag_slug:
-        tag = get_object_or_404(Tag,slug=tag_slug)
+        tag = get_object_or_404(Tag, slug=tag_slug)
         object_list = object_list.filter(tags__in=[tag])
     paginator = Paginator(object_list, 3)  # trzy posty na kazdej stronie
     page = request.GET.get('page')
@@ -109,10 +113,10 @@ def post_details(request, year, month, day, post):
     else:
         comment_form = CommentForm()
     post_tags_ids = post.tags.values_list('id', flat=True)
-    similar_posts = Post.published.filter(tags__in=post_tags_ids)\
-                                  .exclude(id=post.id)
-    similar_posts = similar_posts.annotate(same_tags=Count('tags'))\
-                                 .order_by('-same_tags', '-publish')[:4]
+    similar_posts = Post.published.filter(tags__in=post_tags_ids) \
+        .exclude(id=post.id)
+    similar_posts = similar_posts.annotate(same_tags=Count('tags')) \
+                        .order_by('-same_tags', '-publish')[:4]
     return render(request,
                   'blog/post/details.html',
                   {'post': post,
